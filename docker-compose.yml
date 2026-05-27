@@ -1,0 +1,27 @@
+services:
+  unifi-backup:
+    image: unifi-backup:latest
+    build: .
+    environment:
+      # CRON_SCHEDULE format: minute hour day month weekday
+      # Daily at 3:00 AM
+      - CRON_SCHEDULE=0 3 * * *
+      # Every 6 hours
+      # - CRON_SCHEDULE=0 */6 * * *
+      # Every Sunday at 2:00 AM
+      # - CRON_SCHEDULE=0 2 * * 0
+      # Every 12 hours
+      # - CRON_SCHEDULE=0 */12 * * *
+      - UNIFI_HOST=192.168.1.1
+      - UNIFI_USER=root
+      - UNIFI_KEY_PATH=/root/.ssh/unifi_backup
+      - REMOTE_DIR=/data/autobackup
+      - COPY_TO_SAMBA=false
+      - SAMBA_SHARE=
+      - SAMBA_USER=
+      - SAMBA_PASSWORD=
+      - SAMBA_DOMAIN=
+    volumes:
+      - ./ssh_keys:/root/.ssh:ro
+      - ./backups:/backups
+    restart: unless-stopped
