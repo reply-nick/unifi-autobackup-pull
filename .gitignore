@@ -1,3 +1,4 @@
 ssh_keys/
 backups/
 .env
+docker-compose.yml

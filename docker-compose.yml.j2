@@ -1,0 +1,10 @@
+services:
+  unifi-backup:
+    image: unifi-backup:latest
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./ssh_keys:/root/.ssh:ro
+      - ./backups:/backups
+    restart: unless-stopped
