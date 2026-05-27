@@ -14,7 +14,6 @@ services:
       # - CRON_SCHEDULE=0 */12 * * *
       - UNIFI_HOST=192.168.1.1
       - UNIFI_USER=root
-      - UNIFI_KEY_PATH=/root/.ssh/unifi_backup
       - REMOTE_DIR=/data/autobackup
       - COPY_TO_SAMBA=false
       - SAMBA_SHARE=

@@ -107,10 +107,7 @@ ls ./backups/
 | `CRON_SCHEDULE` | `0 3 * * *` | Cron expression (minute hour day month weekday) |
 | `UNIFI_HOST` | *(required)* | UniFi console IP/hostname |
 | `UNIFI_USER` | `root` | SSH username |
-| `UNIFI_KEY_PATH` | `/root/.ssh/unifi_backup` | SSH key path inside container |
 | `REMOTE_DIR` | `/data/unifi/data/backup/autobackup/` | Remote backup directory on UniFi |
-| `LOCAL_DIR` | `/backups` | Backup destination inside container |
-| `KEEP_DAYS` | `30` | Prune `.unf` files older than N days |
 | `LOG_PATH` | `/var/log/unifi-backup.log` | Log file location |
 
 ### Example Schedules
