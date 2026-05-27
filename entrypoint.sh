@@ -18,5 +18,8 @@ fi
 echo "$CRON_SCHEDULE /app/pull-unifi-backup.sh" | crontab -
 echo "Cron schedule set to: $CRON_SCHEDULE"
 
+# Run backup immediately on boot
+/app/pull-unifi-backup.sh
+
 # Run cron in foreground (foreground mode for Docker)
 exec bash -c 'crond -f -l 8 & wait'
