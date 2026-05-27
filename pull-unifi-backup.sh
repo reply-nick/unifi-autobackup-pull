@@ -46,7 +46,12 @@ else
 
     log "Pulling $fname ..."
     scp_exit=0
-    $SSH_CMD -q "${UNIFI_USER}@${UNIFI_HOST}:${remote_file}" "$local_file" >> "$LOG_PATH" 2>&1 || scp_exit=$?
+    scp -i /root/.ssh/unifi_backup \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 \
+      -q \
+      "${UNIFI_USER}@${UNIFI_HOST}:${remote_file}" "$local_file" >> "$LOG_PATH" 2>&1 || scp_exit=$?
 
     if [ $scp_exit -eq 0 ]; then
       log "Pulled $fname successfully."
