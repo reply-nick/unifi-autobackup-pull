@@ -21,23 +21,20 @@ log "Starting UniFi backup pull from ${UNIFI_HOST}:${REMOTE_DIR} ..."
 
 mkdir -p "$LOCAL_DIR"
 
-SSH_CMD="ssh -i /root/.ssh/unifi_backup -o StrictHostKeyChecking=no -o ConnectTimeout=10"
+SSH_CMD="ssh -i /root/.ssh/unifi_backup -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 
 # Get list of .unf files on remote
 log "Fetching remote file list..."
-remote_files=()
-while IFS= read -r -d '' f; do
-  remote_files+=("$f")
-done < <($SSH_CMD "${UNIFI_USER}@${UNIFI_HOST}" "find ${REMOTE_DIR} -maxdepth 1 -name '*.unf' -type f -print0 2>/dev/null")
+remote_files=$($SSH_CMD "${UNIFI_USER}@${UNIFI_HOST}" "ls ${REMOTE_DIR}/*.unf 2>/dev/null") || true
 
-if [ ${#remote_files[@]} -eq 0 ]; then
+if [ -z "$remote_files" ]; then
   log "No .unf files found on remote. Nothing to do."
 else
   pull_errors=0
   pulled=0
   skipped=0
 
-  for remote_file in "${remote_files[@]}"; do
+  for remote_file in $remote_files; do
     fname=$(basename "$remote_file")
     local_file="$LOCAL_DIR/$fname"
 
@@ -67,14 +64,7 @@ else
   for local_file in "$LOCAL_DIR"/*.unf; do
     [ -f "$local_file" ] || continue
     fname=$(basename "$local_file")
-    found=false
-    for rf in "${remote_files[@]}"; do
-      if [[ "$(basename "$rf")" == "$fname" ]]; then
-        found=true
-        break
-      fi
-    done
-    if [ "$found" = false ]; then
+    if ! echo "$remote_files" | grep -qF "$fname"; then
       log "Removing $fname (no longer on remote)."
       rm -f "$local_file"
     fi
