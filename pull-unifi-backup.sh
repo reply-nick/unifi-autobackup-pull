@@ -21,16 +21,64 @@ log "Starting UniFi backup pull from ${UNIFI_HOST}:${REMOTE_DIR} ..."
 
 mkdir -p "$LOCAL_DIR"
 
-rsync_exit=0
-rsync -avz --delete --progress \
-  -e "ssh -i /root/.ssh/unifi_backup -o StrictHostKeyChecking=no -o ConnectTimeout=10" \
-  "${UNIFI_USER}@${UNIFI_HOST}:${REMOTE_DIR}/" \
-  "$LOCAL_DIR/" >> "$LOG_PATH" 2>&1 || rsync_exit=$?
+SSH_CMD="ssh -i /root/.ssh/unifi_backup -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
-if [ $rsync_exit -eq 0 ]; then
-  log "Backup pulled successfully."
+# Get list of .unf files on remote
+log "Fetching remote file list..."
+remote_files=()
+while IFS= read -r -d '' f; do
+  remote_files+=("$f")
+done < <($SSH_CMD "${UNIFI_USER}@${UNIFI_HOST}" "find ${REMOTE_DIR} -maxdepth 1 -name '*.unf' -type f -print0 2>/dev/null")
+
+if [ ${#remote_files[@]} -eq 0 ]; then
+  log "No .unf files found on remote. Nothing to do."
 else
-  log "ERROR: rsync failed with exit code $rsync_exit."
+  pull_errors=0
+  pulled=0
+  skipped=0
+
+  for remote_file in "${remote_files[@]}"; do
+    fname=$(basename "$remote_file")
+    local_file="$LOCAL_DIR/$fname"
+
+    if [ -f "$local_file" ]; then
+      log "Skipping $fname (already exists locally)."
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    log "Pulling $fname ..."
+    scp_exit=0
+    $SSH_CMD -q "${UNIFI_USER}@${UNIFI_HOST}:${remote_file}" "$local_file" >> "$LOG_PATH" 2>&1 || scp_exit=$?
+
+    if [ $scp_exit -eq 0 ]; then
+      log "Pulled $fname successfully."
+      pulled=$((pulled + 1))
+    else
+      log "ERROR: Failed to pull $fname (exit code $scp_exit)."
+      pull_errors=$((pull_errors + 1))
+      rm -f "$local_file"  # remove partial file
+    fi
+  done
+
+  log "Summary: pulled=$pulled skipped=$skipped errors=$pull_errors"
+
+  # Mirror deletions: remove local files no longer on remote
+  for local_file in "$LOCAL_DIR"/*.unf; do
+    [ -f "$local_file" ] || continue
+    fname=$(basename "$local_file")
+    found=false
+    for rf in "${remote_files[@]}"; do
+      if [[ "$(basename "$rf")" == "$fname" ]]; then
+        found=true
+        break
+      fi
+    done
+    if [ "$found" = false ]; then
+      log "Removing $fname (no longer on remote)."
+      rm -f "$local_file"
+    fi
+  done
 fi
 
 # --- Optional: Copy to Samba share ---

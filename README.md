@@ -100,6 +100,14 @@ docker compose logs -f
 ls ./backups/
 ```
 
+### How It Works
+
+1. **List** — SSH into the UniFi console and list all `.unf` backup files
+2. **Pull** — Download each file with `scp`, skipping ones already present locally
+3. **Mirror deletions** — Remove local `.unf` files that no longer exist on the remote
+4. **Optional Samba upload** — Upload each `.unf` file to a Samba share, one at a time
+5. **Log summary** — Prints `pulled=N skipped=N errors=N`
+
 ### Configuration Reference
 
 | Env Var | Default | Description |
@@ -107,8 +115,13 @@ ls ./backups/
 | `CRON_SCHEDULE` | `0 3 * * *` | Cron expression (minute hour day month weekday) |
 | `UNIFI_HOST` | *(required)* | UniFi console IP/hostname |
 | `UNIFI_USER` | `root` | SSH username |
-| `REMOTE_DIR` | `/data/unifi/data/backup/autobackup/` | Remote backup directory on UniFi |
+| `REMOTE_DIR` | `/data/autobackup` | Remote backup directory on UniFi |
 | `LOG_PATH` | `/var/log/unifi-backup.log` | Log file location |
+| `COPY_TO_SAMBA` | `false` | Enable copying backups to a Samba share |
+| `SAMBA_SHARE` | — | Samba share URL (e.g. `//192.168.1.10/backups`) |
+| `SAMBA_USER` | — | Samba username |
+| `SAMBA_PASSWORD` | — | Samba password |
+| `SAMBA_DOMAIN` | — | Samba domain (optional) |
 
 ### Example Schedules
 
@@ -144,36 +157,87 @@ Create `/opt/scripts/pull-unifi-backup.sh` (or any path you prefer):
 
 ```bash
 #!/bin/bash
+set -uo pipefail
 
 # --- Configuration ---
 UNIFI_HOST="192.168.1.1"
 UNIFI_USER="root"
 UNIFI_KEY="/home/youruser/.ssh/unifi_backup"
-REMOTE_DIR="/data/unifi/data/backup/autobackup/"
+REMOTE_DIR="/data/autobackup"
 LOCAL_DIR="/volume1/backups/unifi"   # adjust to your NAS share path
-KEEP_DAYS=30
 LOG="/var/log/unifi-backup.log"
 
+# --- Helpers ---
+log() {
+  echo "[$(date +"%Y-%m-%d %H:%M:%S")] $1" | tee -a "$LOG"
+}
+
 # --- Run ---
-DATE=$(date +"%Y-%m-%d %H:%M:%S")
-echo "[$DATE] Starting UniFi backup pull..." >> "$LOG"
+log "Starting UniFi backup pull from ${UNIFI_HOST}:${REMOTE_DIR} ..."
 
 mkdir -p "$LOCAL_DIR"
 
-rsync -avz --progress \
-  -e "ssh -i $UNIFI_KEY -o StrictHostKeyChecking=no" \
-  "${UNIFI_USER}@${UNIFI_HOST}:${REMOTE_DIR}/" \
-  "$LOCAL_DIR/" >> "$LOG" 2>&1
+SSH_CMD="ssh -i $UNIFI_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
-if [ $? -eq 0 ]; then
-  echo "[$DATE] Backup pulled successfully." >> "$LOG"
+# Get list of .unf files on remote
+log "Fetching remote file list..."
+remote_files=()
+while IFS= read -r -d '' f; do
+  remote_files+=("$f")
+done < <($SSH_CMD "${UNIFI_USER}@${UNIFI_HOST}" "find ${REMOTE_DIR} -maxdepth 1 -name '*.unf' -type f -print0 2>/dev/null")
+
+if [ ${#remote_files[@]} -eq 0 ]; then
+  log "No .unf files found on remote. Nothing to do."
 else
-  echo "[$DATE] ERROR: rsync failed!" >> "$LOG"
+  pull_errors=0
+  pulled=0
+  skipped=0
+
+  for remote_file in "${remote_files[@]}"; do
+    fname=$(basename "$remote_file")
+    local_file="$LOCAL_DIR/$fname"
+
+    if [ -f "$local_file" ]; then
+      log "Skipping $fname (already exists locally)."
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    log "Pulling $fname ..."
+    scp_exit=0
+    $SSH_CMD -q "${UNIFI_USER}@${UNIFI_HOST}:${remote_file}" "$local_file" >> "$LOG" 2>&1 || scp_exit=$?
+
+    if [ $scp_exit -eq 0 ]; then
+      log "Pulled $fname successfully."
+      pulled=$((pulled + 1))
+    else
+      log "ERROR: Failed to pull $fname (exit code $scp_exit)."
+      pull_errors=$((pull_errors + 1))
+      rm -f "$local_file"
+    fi
+  done
+
+  log "Summary: pulled=$pulled skipped=$skipped errors=$pull_errors"
+
+  # Mirror deletions
+  for local_file in "$LOCAL_DIR"/*.unf; do
+    [ -f "$local_file" ] || continue
+    fname=$(basename "$local_file")
+    found=false
+    for rf in "${remote_files[@]}"; do
+      if [[ "$(basename "$rf")" == "$fname" ]]; then
+        found=true
+        break
+      fi
+    done
+    if [ "$found" = false ]; then
+      log "Removing $fname (no longer on remote)."
+      rm -f "$local_file"
+    fi
+  done
 fi
 
-# Prune backups older than $KEEP_DAYS days
-find "$LOCAL_DIR" -name "*.unf" -mtime +$KEEP_DAYS -delete
-echo "[$DATE] Old backups pruned (older than $KEEP_DAYS days)." >> "$LOG"
+log "Done."
 ```
 
 Make it executable:
@@ -221,9 +285,9 @@ Add a daily job at 3:00 AM:
 
 ## Troubleshooting
 
-**rsync fails with "Permission denied"**
-- Confirm the SSH key was copied correctly: `ssh -i ~/.ssh/unifi_backup root@<ip>`
-- Check that `/data/autobackup/` is readable by root
+**scp fails with "Permission denied"**
+- Confirm the SSH key works: `ssh -i ~/.ssh/unifi_backup root@<ip> "ls /data/autobackup/"`
+- Check that `/data/autobackup/` contains `.unf` files
 
 **No `.unf` files found**
 - Trigger a manual backup: **Settings > Control Plane > Backups > Create Backup**
